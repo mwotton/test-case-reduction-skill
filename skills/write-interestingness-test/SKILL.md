@@ -87,22 +87,31 @@ python3 -c "import ast; ast.parse(open('$1').read())" 2>/dev/null || exit 1
 
 ### Phase 3: Bug Reproduction
 
-Check for the **specific** bug, not just any failure:
+Check for the **specific** bug, not just any failure. The recommended pattern is to capture output to a file, check the exit code, then grep the file. Piping (`tool | grep`) loses the exit code of the tool, which is often an important signal.
 
 ```bash
 # BAD: Too broad — will find any crash, not YOUR crash
 some_tool "$1" 2>&1; test $? -ne 0
 
-# GOOD: Match the specific error message
-some_tool "$1" 2>&1 | grep -q "specific error: in function_name"
+# BAD: Piping loses the exit code of some_tool
+some_tool "$1" 2>&1 | grep -q "specific error"
 
-# GOOD: Match specific exit code (e.g., SIGSEGV = 139)
-some_tool "$1" 2>&1 >/dev/null; test $? -eq 139
+# GOOD: Capture output, check exit code, then grep
+some_tool "$1" > output.txt 2>&1
+exit_code=$?
+
+# Check exit code first (cheap) — e.g., SIGSEGV = 139, SIGABRT = 134
+test $exit_code -ne 0 || exit 1
+
+# Then check for the specific error message
+grep -q "specific error: in function_name" output.txt
 ```
+
+This pattern lets you check both the exit code AND the output, which is more precise than either alone. It also means the grep runs on a local file (fast) rather than blocking on a pipe.
 
 For **wrong-code bugs** (differential testing):
 ```bash
-gcc -O0 -o exe0 reduced.c && gcc -O2 -o exe2 reduced.c || exit 1
+gcc -O0 -o exe0 "$1" && gcc -O2 -o exe2 "$1" || exit 1
 timeout 5 ./exe0 > out0.txt 2>&1 || exit 1
 timeout 5 ./exe2 > out2.txt 2>&1 || exit 1
 ! diff -q out0.txt out2.txt >/dev/null 2>&1
@@ -134,11 +143,12 @@ When the buggy tool *crashes* (non-zero exit) under the bad condition but *succe
 ! some_tool "$1" 2>/dev/null
 ```
 
-But this is too broad (any failure counts). Better to check the specific error:
+But this is too broad (any failure counts). Better to capture and check specifically:
 
 ```bash
 #!/bin/bash
-some_tool "$1" 2>&1 | grep -q "specific crash message"
+some_tool "$1" > output.txt 2>&1
+grep -q "specific crash message" output.txt
 ```
 
 ### The "Not Bogus" Pattern
@@ -151,7 +161,8 @@ For bugs in tools that process structured input, a powerful pattern is: first ve
 reference_tool "$1" >/dev/null 2>&1 || exit 1
 
 # But buggy tool crashes on it
-buggy_tool "$1" 2>&1 | grep -q "specific error"
+buggy_tool "$1" > output.txt 2>&1
+grep -q "specific error" output.txt
 ```
 
 This is especially important when the bug is "tool crashes on valid input." Without the validity check, the reducer will find the simplest *invalid* input that crashes the tool, which is rarely the bug you care about.
@@ -203,7 +214,8 @@ shrinkray runs your interestingness test in a **temporary directory**, not your 
 
 ```bash
 #!/bin/bash
-some_tool "$1" 2>&1 | grep -q "error"
+some_tool "$1" > output.txt 2>&1
+grep -q "specific error" output.txt
 ```
 
 This is the recommended default. Only use other input modes if you have a specific reason:
@@ -212,14 +224,16 @@ This is the recommended default. Only use other input modes if you have a specif
 ```bash
 #!/bin/bash
 # Tool only reads stdin, no filename argument
-stdin_only_tool < "$1" 2>&1 | grep -q "specific error"
+stdin_only_tool < "$1" > output.txt 2>&1
+grep -q "specific error" output.txt
 ```
 
 **basename** — Only needed for creduce compatibility or if the tool requires the file to have a specific name/extension and be in the CWD. The file is placed in the CWD with the same basename as the original:
 ```bash
 #!/bin/bash
 # Only use this if the tool requires a specific filename in CWD
-some_tool original_name.ext 2>&1 | grep -q "error"
+some_tool original_name.ext > output.txt 2>&1
+grep -q "specific error" output.txt
 ```
 
 If your test only uses one mode, tell shrinkray to skip the others:
@@ -253,7 +267,8 @@ Or just hardcode absolute paths:
 ```bash
 #!/bin/bash
 /home/user/tools/reference_compiler -c "$1" 2>/dev/null || exit 1
-gcc -O2 -c "$1" 2>&1 | grep -q "internal compiler error"
+gcc -O2 -c "$1" > output.txt 2>&1
+grep -q "internal compiler error" output.txt
 ```
 
 ### Tracking Multiple Interesting Behaviors
@@ -289,7 +304,9 @@ Recorded variants are saved in `.shrinkray/` history for later investigation.
 ulimit -t 10
 ulimit -v 2000000
 
-gcc -O2 -c "$1" 2>&1 | grep -q "internal compiler error: in fold_convert_loc"
+gcc -O2 -c "$1" > output.txt 2>&1
+# GCC ICEs produce a specific error string — check for it
+grep -q "internal compiler error: in fold_convert_loc" output.txt
 ```
 
 ### Wrong-Code Bug with UB Protection
@@ -363,8 +380,8 @@ sys.exit(1)
 #!/bin/bash
 ulimit -t 30
 
-# Check for specific ICE in rustc
-rustc --edition 2021 "$1" 2>&1 | grep -q "internal compiler error.*query stack"
+rustc --edition 2021 "$1" > output.txt 2>&1
+grep -q "internal compiler error.*query stack" output.txt
 ```
 
 ### JavaScript Tool Bug
@@ -377,7 +394,8 @@ rustc --edition 2021 "$1" 2>&1 | grep -q "internal compiler error.*query stack"
 node -e "require('acorn').parse(require('fs').readFileSync('$1','utf8'),{ecmaVersion:2020})" 2>/dev/null || exit 1
 
 # Bug: specific error in tool under test
-node /absolute/path/to/buggy_tool.js "$1" 2>&1 | grep -q "RangeError: Maximum call stack"
+node /absolute/path/to/buggy_tool.js "$1" > output.txt 2>&1
+grep -q "RangeError: Maximum call stack" output.txt
 ```
 
 ### Hang/Performance Bug
@@ -400,7 +418,8 @@ test $? -eq 124
 python3 -c "import json; json.load(open('$1'))" 2>/dev/null || exit 1
 
 # Must trigger the specific bug
-buggy_json_tool "$1" 2>&1 | grep -q "KeyError: 'unexpected_field'"
+buggy_json_tool "$1" > output.txt 2>&1
+grep -q "KeyError: 'unexpected_field'" output.txt
 ```
 
 ### Binary Format
@@ -412,8 +431,13 @@ buggy_json_tool "$1" 2>&1 | grep -q "KeyError: 'unexpected_field'"
 # Must be non-empty
 test -s "$1" || exit 1
 
-# Must trigger the specific crash
-buggy_parser "$1" 2>&1 | grep -q "SIGABRT\|Assertion.*failed"
+# Run the parser, capture output and exit code
+buggy_parser "$1" > output.txt 2>&1
+exit_code=$?
+
+# Check for the specific crash (SIGABRT = 134)
+test $exit_code -eq 134 || exit 1
+grep -q "Assertion.*failed" output.txt
 ```
 
 ### Differential Testing (Two Tool Versions)
@@ -445,7 +469,8 @@ cd "$1" || exit 1  # $1 is the directory path
 make -j4 >/dev/null 2>&1 || exit 1
 
 # Must still trigger the bug
-timeout 10 ./run_test 2>&1 | grep -q "specific error"
+timeout 10 ./run_test > output.txt 2>&1
+grep -q "specific error" output.txt
 ```
 
 Run with: `shrinkray ./test.sh ./project-directory/`
