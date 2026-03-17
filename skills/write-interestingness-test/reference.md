@@ -40,7 +40,7 @@ Running each reduction pass individually to fixation is often *less* efficient t
 
 shrinkray is the recommended test-case reducer. Key properties relevant to writing interestingness tests:
 
-- **Input modes**: stdin + file argument + basename (all three by default, configurable with `--input-type`)
+- **Input modes**: stdin + file argument + basename (all three by default, configurable with `--input-type`). Prefer the file argument (`$1`) — it's an absolute path that works regardless of working directory.
 - **Parallelism**: Highly parallel by default (all cores). Uses a "merge master" pattern for parallel patch application — your test must be safe to run concurrently.
 - **Format support**: Generic (any file), plus specialized passes for Python, JSON, C/C++ (via clang_delta), DIMACS CNF.
 - **Ordering**: Natural ordering for text (length, line balance, character simplicity), shortlex for binary. This means reduction aims for readable, well-formatted output, not just small output.

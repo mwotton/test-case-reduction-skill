@@ -195,36 +195,65 @@ if __name__ == '__main__':
         sys.exit(1)
 ```
 
-### Using stdin vs File Argument
+### Input Mode and Temporary Directories
 
-shrinkray passes input three ways by default. Your test can use whichever is most convenient:
+shrinkray runs your interestingness test in a **temporary directory**, not your original working directory. This is the single most common source of confusion. Your test will fail if it assumes it's running in your project directory or that any files other than the test case exist.
 
-**Reading from a file argument** (`$1`):
+**Always use the command-line argument form** (`$1`) to read the test case. This is the simplest and most reliable approach — `$1` is an absolute path to a temporary copy of the test case, so it works regardless of what directory the test runs in:
+
 ```bash
 #!/bin/bash
 some_tool "$1" 2>&1 | grep -q "error"
 ```
 
-**Reading from stdin** (useful for piping into Python/Ruby/etc.):
+This is the recommended default. Only use other input modes if you have a specific reason:
+
+**stdin** — Only if the tool you're testing exclusively reads from stdin and doesn't accept filenames:
 ```bash
 #!/bin/bash
-python3 -c "
-import sys
-data = sys.stdin.read()
-# ... process data ...
-" < "$1"
+# Tool only reads stdin, no filename argument
+stdin_only_tool < "$1" 2>&1 | grep -q "specific error"
 ```
 
-**Using the basename file in CWD** (creduce-compatible):
+**basename** — Only needed for creduce compatibility or if the tool requires the file to have a specific name/extension and be in the CWD. The file is placed in the CWD with the same basename as the original:
 ```bash
 #!/bin/bash
-# The file is available as its original basename in the working directory
+# Only use this if the tool requires a specific filename in CWD
 some_tool original_name.ext 2>&1 | grep -q "error"
 ```
 
-If your test only uses one mode, tell shrinkray to save overhead:
+If your test only uses one mode, tell shrinkray to skip the others:
 ```bash
 shrinkray --input-type=arg ./test.sh file.c
+```
+
+### What the Temporary Directory Means in Practice
+
+Because the test runs in a temp directory:
+
+- **Auxiliary files don't exist.** If your test needs helper scripts, data files, headers, or libraries, reference them by **absolute path**. Relative paths like `./helper.sh` or `../data/expected.json` will fail.
+- **Your shell environment may differ.** Tools must be on PATH or referenced by absolute path.
+- **Each parallel invocation gets its own temp directory.** You can safely create temp files *within* the CWD without worrying about collisions between parallel test runs. But don't write to shared locations like `/tmp/output.txt` — parallel runs will clobber each other.
+- **The CWD is ephemeral.** Don't rely on files persisting between invocations.
+
+Common pattern for tests that need auxiliary files:
+
+```bash
+#!/bin/bash
+# Resolve paths relative to the test script's location, not CWD
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Reference auxiliary files by absolute path
+"$SCRIPT_DIR/reference_tool" "$1" >/dev/null 2>&1 || exit 1
+diff <(some_tool "$1") "$SCRIPT_DIR/expected_output.txt"
+```
+
+Or just hardcode absolute paths:
+
+```bash
+#!/bin/bash
+/home/user/tools/reference_compiler -c "$1" 2>/dev/null || exit 1
+gcc -O2 -c "$1" 2>&1 | grep -q "internal compiler error"
 ```
 
 ### Tracking Multiple Interesting Behaviors
@@ -271,15 +300,15 @@ ulimit -t 10
 ulimit -v 2000000
 
 # Must compile cleanly (reject UB-introducing reductions)
-gcc -Wall -Wextra -pedantic -Werror -c small.c 2>/dev/null || exit 1
-clang -Wall -Wextra -pedantic -Werror -c small.c 2>/dev/null || exit 1
+gcc -Wall -Wextra -pedantic -Werror -c "$1" 2>/dev/null || exit 1
+clang -Wall -Wextra -pedantic -Werror -c "$1" 2>/dev/null || exit 1
 
 # Must not trigger UB at runtime
-gcc -fsanitize=undefined -o test_ub small.c 2>/dev/null || exit 1
+gcc -fsanitize=undefined -o test_ub "$1" 2>/dev/null || exit 1
 timeout 5 ./test_ub >/dev/null 2>&1 || exit 1
 
 # Differential test: O0 vs O2 must produce different output
-gcc -O0 -o exe0 small.c && gcc -O2 -o exe2 small.c || exit 1
+gcc -O0 -o exe0 "$1" && gcc -O2 -o exe2 "$1" || exit 1
 out0=$(timeout 5 ./exe0 2>&1) || exit 1
 out2=$(timeout 5 ./exe2 2>&1) || exit 1
 [ "$out0" != "$out2" ]
@@ -287,27 +316,14 @@ out2=$(timeout 5 ./exe2 2>&1) || exit 1
 
 ### Python Tool Bug — shrinkray
 
-```bash
-#!/bin/bash
-# Reduce Python code that triggers a TypeError in libcst
-python3 -c "
-import libcst, sys
-try:
-    libcst.parse_module(sys.stdin.read())
-except TypeError:
-    sys.exit(0)
-sys.exit(1)
-" < "$1"
-```
-
-Or as a standalone Python script (useful for more complex logic):
 ```python
 #!/usr/bin/env python3
 import libcst
 import sys
+from pathlib import Path
 
 try:
-    libcst.parse_module(sys.stdin.read())
+    libcst.parse_module(Path(sys.argv[1]).read_text())
 except TypeError:
     sys.exit(0)
 sys.exit(1)
@@ -321,8 +337,9 @@ sys.exit(1)
 import ast
 import subprocess
 import sys
+from pathlib import Path
 
-code = sys.stdin.read()
+code = Path(sys.argv[1]).read_text()
 
 # Not bogus: must be valid Python
 try:
@@ -332,8 +349,8 @@ except SyntaxError:
 
 # Bug reproduction: some_tool crashes on it
 result = subprocess.run(
-    ['some_tool', '--check', '-'],
-    input=code.encode(), capture_output=True, timeout=10
+    ['some_tool', '--check', sys.argv[1]],
+    capture_output=True, timeout=10
 )
 if b"AssertionError" in result.stderr:
     sys.exit(0)
@@ -380,7 +397,7 @@ test $? -eq 124
 # Reduce JSON that triggers a bug in a JSON processor
 
 # Must still be valid JSON
-python3 -c "import json,sys; json.load(sys.stdin)" < "$1" || exit 1
+python3 -c "import json; json.load(open('$1'))" 2>/dev/null || exit 1
 
 # Must trigger the specific bug
 buggy_json_tool "$1" 2>&1 | grep -q "KeyError: 'unexpected_field'"
@@ -480,13 +497,15 @@ The reducer calls your test thousands of times. A 10-second test vs a 1-second t
 
 ### 7. Temp Directory Confusion
 
-Most reducers run the test in a fresh temporary directory. Relative paths to auxiliary files will break.
+shrinkray runs the test in a fresh temporary directory. This is the most common source of interestingness tests that work manually but fail under the reducer. See the detailed "Input Mode and Temporary Directories" section above.
 
-**Fix**: Use absolute paths for everything except the file being reduced.
+**Symptoms**: Test works when you run it by hand but shrinkray says the initial test case is not interesting. Or the test passes for the original file but fails for all candidates.
+
+**Fix**: Use `$1` (the file argument) to read the test case — it's an absolute path that works from any directory. Use absolute paths or `SCRIPT_DIR`-relative paths for all auxiliary files, tools, and data.
 
 ## shrinkray-Specific Notes
 
-- **Input modes**: By default, shrinkray passes test cases via stdin, as a file argument, and as a basename file. Use `--input-type=stdin` if your test reads stdin, `--input-type=arg` if it takes a filename argument, or `--input-type=basename` for creduce-style.
+- **Input modes**: By default, shrinkray passes test cases via stdin, file argument, and basename file (all three). Prefer the file argument (`$1`) — it's an absolute path and the most reliable. Use `--input-type=arg` if your test only uses the argument, to save overhead.
 - **Timeout auto-calibration**: If you don't set `--timeout`, shrinkray runs the test once and sets timeout to 10x the measured time (capped at 5 minutes, minimum 1 second).
 - **Trivial result detection**: By default, shrinkray warns if the result is 0-1 bytes (your test is probably too permissive). Use `--trivial-is-not-error` to suppress this.
 - **Also-interesting**: Exit code 101 records the test case in history but doesn't use it for reduction — useful for tracking interesting-but-different behaviors.

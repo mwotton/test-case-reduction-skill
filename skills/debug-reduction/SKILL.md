@@ -117,18 +117,22 @@ You are helping the user diagnose and fix problems with their test-case reductio
 
 **Symptoms**:
 - `./test.sh file.c && echo interesting` works fine manually
-- But the reducer says the initial test case is not interesting
+- But shrinkray says the initial test case is not interesting
 
-**Diagnosis**: Environment differences between your shell and the reducer's execution context.
+**Diagnosis**: This is almost always a temporary directory problem. shrinkray runs the test in a fresh temp directory, not your working directory. Anything that depends on your local environment will break.
 
 **Fixes**:
-- **PATH differences**: Use absolute paths for all tools in the test script
-- **Working directory**: The reducer runs the test in a temp directory. Use absolute paths for auxiliary files
-- **Input method mismatch**:
-  - For shrinkray: check which `--input-type` you're using. If your test reads from `$1` (file argument), `--input-type=arg` or `--input-type=all` should work
-  - For creduce: the file is always in CWD with its original basename — make sure your test references it correctly
-- **Missing dependencies**: If your test script sources other files or uses tools not in PATH, they won't be available in the temp directory
-- **Permissions**: Ensure the test is executable (`chmod +x test.sh`)
+- **Use `$1` for the test case**: The file argument is an absolute path and works from any directory. If the test references the file by a hardcoded relative path or basename, switch to `$1`.
+- **Use absolute paths for everything else**: Tools, helper scripts, auxiliary data files, reference implementations — anything that isn't the test case itself must be an absolute path or resolved via `SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"`.
+- **Check PATH**: Tools you have on PATH in your shell may not be on PATH in the reducer's environment. Use full paths to be safe.
+- **Missing dependencies**: If your test script sources other files or uses tools not in the default PATH, they won't be available in the temp directory.
+- **Permissions**: Ensure the test is executable (`chmod +x test.sh`).
+
+**Quick diagnostic**: Run the test from a different directory to simulate the reducer's environment:
+```bash
+cd /tmp && /absolute/path/to/test.sh /absolute/path/to/original_file
+```
+If this fails but running from your project directory succeeds, the test has a directory dependency.
 
 ## Diagnostic Steps
 
