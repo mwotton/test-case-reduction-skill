@@ -1,6 +1,6 @@
 ---
 name: debug-reduction
-description: Diagnose problems with test-case reduction — unexpected results, reduction getting stuck, slippage to wrong bugs, or interestingness test issues. Use when reduction output is surprising or reduction is not making progress.
+description: Diagnose problems with shrinkray test-case reduction — unexpected results, reduction getting stuck, slippage to wrong bugs, or interestingness test issues. Use when reduction output is surprising or reduction is not making progress.
 user-invocable: true
 argument-hint: [description of the problem with reduction]
 ---
@@ -152,23 +152,12 @@ When the user reports a problem, work through these steps:
 - **Flaky tests**: May need fundamental rethinking if the bug is inherently non-deterministic
 - **Slow tests**: Reorder checks and optimize (incremental patching)
 
-## Tool-Specific Debugging
+## shrinkray Debugging Options
 
-### shrinkray
 - Check `--timeout` setting (auto-calibrated by default — if the initial run is slow, the timeout may be too generous)
 - Check `--input-type` matches how the test reads its input
 - Use `--volume=debug` for detailed pass-by-pass progress
 - Check `.shrinkray/` history directory for intermediate results
 - Use `--also-interesting=101` in the test to record interesting-but-wrong variants
-
-### creduce/cvise
-- Creduce validates the test at startup — if it fails, the test or environment is wrong
-- Use `--print-diff` to see what transformations are being applied
-- Use `--timing` to identify slow passes
-- Use `--not-c` for non-C/C++ files
-- `--sllooww` enables additional passes for more thorough reduction (but is much slower)
-
-### General
-- Try running the reducer with `--parallelism=1` / `--n 1` to eliminate parallel-related issues
-- Save intermediate results to diagnose where reduction goes wrong
-- Try a completely different reducer to see if the problem is reducer-specific or test-specific
+- Try `--parallelism=1` to eliminate parallel-related issues
+- Try `--formatter=none` if auto-formatting is interfering with reduction

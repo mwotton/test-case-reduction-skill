@@ -1,13 +1,13 @@
 ---
 name: write-interestingness-test
-description: Help write an interestingness test for a test-case reducer. Use when the user needs to reduce a test case, write or fix an interestingness test, or is working with shrinkray, creduce, cvise, or other reducers.
+description: Help write an interestingness test for shrinkray (test-case reducer). Use when the user needs to reduce a test case, write or fix an interestingness test, or is working with test-case reduction.
 user-invocable: true
 argument-hint: [description of the bug or property to test for]
 ---
 
 # Writing Interestingness Tests for Test-Case Reduction
 
-You are helping the user write an **interestingness test** — a script that a test-case reducer (shrinkray, creduce, cvise, etc.) uses to determine whether a candidate test case still exhibits the property of interest.
+You are helping the user write an **interestingness test** — a script that shrinkray (or another test-case reducer) uses to determine whether a candidate test case still exhibits the property of interest. Always assume shrinkray unless the user specifically asks for a different reducer.
 
 ## What You Need to Know
 
@@ -26,17 +26,12 @@ Before writing anything, determine:
    - The tool/compiler/program that exhibits the bug
    - Whether this is a crash, wrong output, hang, or other misbehavior
 
-2. **What reducer will be used?** Default to shrinkray unless told otherwise. Key differences:
-   - **shrinkray**: Test cases passed via stdin, file argument, AND as a basename file in CWD (all three by default). Configurable with `--input-type`.
-   - **creduce/cvise**: Test case is a file in the CWD with its original basename. No arguments passed to script.
-   - **lithium**: Test case path passed as command-line argument.
-
-3. **What format is the test case?** This affects validity checking:
+2. **What format is the test case?** This affects validity checking:
    - Source code (C, Python, JS, etc.) — may need compilation/parse checks
    - Data files (JSON, XML, etc.) — may need schema validation
    - Binary formats — usually just need the tool to accept them
 
-4. **Is there a risk of undefined behavior or bug slippage?** Especially critical for C/C++ wrong-code bugs.
+3. **Is there a risk of undefined behavior or bug slippage?** Especially critical for C/C++ wrong-code bugs.
 
 ## Structure of a Good Interestingness Test
 
@@ -266,17 +261,6 @@ ulimit -t 10
 ulimit -v 2000000
 
 gcc -O2 -c "$1" 2>&1 | grep -q "internal compiler error: in fold_convert_loc"
-```
-
-### Compiler Crash — creduce/cvise
-
-```bash
-#!/bin/bash
-# Note: creduce puts the file in CWD with original basename
-ulimit -t 10
-ulimit -v 2000000
-
-gcc -O2 -c small.c 2>&1 | grep -q "internal compiler error: in fold_convert_loc"
 ```
 
 ### Wrong-Code Bug with UB Protection
@@ -525,7 +509,7 @@ Based on the information gathered, write the interestingness test. Key principle
 After writing, suggest the user verify with:
 ```bash
 # Should exit 0 (interesting)
-./test.sh original_file.c; echo $?
+./test.sh original_file; echo $?
 
 # Should exit non-zero (not interesting)
 echo "" | ./test.sh /dev/stdin; echo $?
@@ -533,10 +517,5 @@ echo "" | ./test.sh /dev/stdin; echo $?
 
 Then suggest the shrinkray invocation:
 ```bash
-shrinkray ./test.sh original_file.c
-```
-
-Or for creduce:
-```bash
-creduce ./test.sh original_file.c
+shrinkray ./test.sh original_file
 ```

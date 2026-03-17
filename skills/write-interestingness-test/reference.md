@@ -36,34 +36,18 @@ Running each reduction pass individually to fixation is often *less* efficient t
 - **Cause Reduction** (Groce et al., 2016): Extends delta debugging to simplify test cases with respect to arbitrary effects beyond crashes (e.g., code coverage, execution behavior).
 - **Mitigating Test Reduction Slippage** (Groce et al., 2016): Formal treatment of slippage — can be mitigated by more precise oracles, and exploited by outputting a set of reduced tests to capture multiple faults.
 
-## Tool Comparison
+## shrinkray
 
-### shrinkray
-- **Best for**: Any file format, especially text-like. Highly parallel. Best generic reducer available.
+shrinkray is the recommended test-case reducer. Key properties relevant to writing interestingness tests:
+
 - **Input modes**: stdin + file argument + basename (all three by default, configurable with `--input-type`)
-- **Parallelism**: Highly parallel by default (all cores). Uses innovative "merge master" pattern for parallel patch application.
+- **Parallelism**: Highly parallel by default (all cores). Uses a "merge master" pattern for parallel patch application — your test must be safe to run concurrently.
 - **Format support**: Generic (any file), plus specialized passes for Python, JSON, C/C++ (via clang_delta), DIMACS CNF.
-- **Ordering**: Natural ordering for text (length, line balance, character simplicity), shortlex for binary.
-- **Unique features**: Reduction pumps (temporarily increase size for deeper reduction), four-tier pass organization, TUI, history recording, auto-timeout calibration.
+- **Ordering**: Natural ordering for text (length, line balance, character simplicity), shortlex for binary. This means reduction aims for readable, well-formatted output, not just small output.
+- **Timeout**: Auto-calibrated to 10x initial test runtime (capped at 5 min, min 1 sec). Tests that timeout are treated as non-interesting.
+- **Trivial detection**: Warns if the result is 0-1 bytes (interestingness test is probably too permissive).
+- **History**: Saves intermediate reductions to `.shrinkray/` for debugging.
 - **Install**: `pipx install shrinkray`
-
-### creduce / cvise
-- **Best for**: C/C++ specifically (110+ Clang-based passes). Also works on other languages with `--not-c`.
-- **Input mode**: File in CWD with original basename. No arguments to script.
-- **Parallelism**: Speculative parallelism (2-3x speedup typical). cvise defaults to all cores.
-- **Unique features**: AST-aware C/C++ transformations (function removal, type simplification, inlining). cvise is the more maintained Python port.
-- **Install**: Package manager (`apt install creduce` or `brew install creduce`)
-
-### lithium
-- **Best for**: Line-based reduction of text files. Simple and reliable.
-- **Input mode**: File path passed as argument.
-- **Algorithm**: Modified ddmin on lines.
-
-### Other tools
-- **halfempty** (Google Project Zero): Parallel binary reducer using pessimistic speculative execution. Good for binary formats.
-- **picire/picireny**: Python delta debugging with HDD support using ANTLR grammars.
-- **treereduce**: Syntax-aware reducer using tree-sitter grammars. Fast, written in Rust.
-- **afl-tmin**: Minimizer for AFL/AFL++ fuzzer findings. Uses coverage instrumentation.
 
 ## Interestingness Test Patterns by Bug Type
 

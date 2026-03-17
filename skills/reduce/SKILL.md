@@ -1,6 +1,6 @@
 ---
 name: reduce
-description: Guide the user through setting up and running a test-case reduction. Use when the user has a file that triggers a bug and wants to minimize it, or needs help choosing a reducer and configuring the reduction.
+description: Guide the user through setting up and running test-case reduction with shrinkray. Use when the user has a file that triggers a bug and wants to minimize it.
 user-invocable: true
 argument-hint: [file and bug description]
 ---
@@ -17,27 +17,7 @@ Ask about:
 3. **What format?** C/C++, Python, JavaScript, JSON, binary, other?
 4. **Do they already have an interestingness test?** If so, review it. If not, help them write one (invoke the `write-interestingness-test` skill).
 
-## Step 2: Choose the Right Tool
-
-**Default to shrinkray** unless there's a specific reason not to.
-
-Use **creduce/cvise** when:
-- Reducing C/C++ specifically and need AST-aware transformations
-- The user already has creduce installed and is familiar with it
-- Need `clang_delta` transformations (note: shrinkray also supports these if creduce is installed)
-
-Use **shrinkray** when:
-- Any format (text, binary, mixed)
-- Want maximum parallelism
-- Reducing Python, JSON, or SAT problems (built-in specialized passes)
-- Want a modern TUI with progress tracking
-
-Use **other tools** when:
-- **afl-tmin**: Reducing AFL/AFL++ fuzzer findings
-- **treereduce**: Need fast tree-sitter grammar-aware reduction
-- **lithium**: Simple line-based reduction
-
-## Step 3: Preprocess if Needed
+## Step 2: Preprocess if Needed
 
 ### C/C++ files
 Preprocessing eliminates header dependencies and gives the reducer much more freedom:
@@ -61,7 +41,7 @@ shrinkray test.sh ./test-directory/
 ### Very large files
 Consider manual pre-reduction: remove sections that are obviously irrelevant (dead code, unrelated functions, unused imports) before starting the reducer.
 
-## Step 4: Write the Interestingness Test
+## Step 3: Write the Interestingness Test
 
 If the user doesn't have one, help them write one. The test must:
 - Exit 0 when the bug is present (interesting)
@@ -81,9 +61,8 @@ See the `write-interestingness-test` skill for detailed guidance.
 echo "" | ./test.sh /dev/stdin; echo "Exit: $?"
 ```
 
-## Step 5: Run the Reducer
+## Step 4: Run shrinkray
 
-### shrinkray
 ```bash
 shrinkray ./test.sh file_to_reduce
 ```
@@ -96,33 +75,14 @@ Key options to consider:
 - `--volume debug` — Verbose output for troubleshooting
 - `--seed N` — Set random seed for reproducibility
 
-### creduce
-```bash
-creduce ./test.sh file_to_reduce
-```
-
-Key options:
-- `--n N` — Parallel cores
-- `--timeout N` — Per-test timeout (default: 300s — consider lowering)
-- `--not-c` — Skip C/C++-specific passes (for other languages)
-- `--sllooww` — More thorough reduction (much slower)
-
-### cvise
-```bash
-cvise ./test.sh file_to_reduce
-```
-Same options as creduce, but defaults to using all cores.
-
-## Step 6: Monitor and Iterate
+## Step 5: Monitor and Iterate
 
 - **If reduction stalls**: The result may be a local minimum. Try:
-  - Manual simplification of the stuck result, then re-running
-  - A different reducer
+  - Manual simplification of the stuck result, then re-running shrinkray
   - Loosening unnecessary constraints in the interestingness test
 - **If the result looks wrong**: The interestingness test probably has a bug. See the `debug-reduction` skill.
-- **If you want an even smaller result**: Run a second reducer on the output of the first (e.g., creduce output through shrinkray).
 
-## Step 7: Verify the Result
+## Step 6: Verify the Result
 
 After reduction completes:
 1. **Run the interestingness test on the result** to confirm it still triggers the bug
