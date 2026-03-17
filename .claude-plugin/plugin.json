@@ -1,0 +1,8 @@
+{
+  "name": "test-case-reduction",
+  "description": "Skills for working with test-case reducers, especially writing good interestingness tests. Prioritizes shrinkray but applies to any reducer (creduce, cvise, lithium, etc.).",
+  "version": "0.1.0",
+  "author": {
+    "name": "David R. MacIver"
+  }
+}
