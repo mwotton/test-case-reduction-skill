@@ -80,8 +80,8 @@ You are helping the user diagnose and fix problems with their test-case reductio
 - Disable ASLR: `setarch $(uname -m) -R ./test.sh file.c`
 - Pin random seeds if the tool supports it
 - Clean up temp files at the start of each test invocation
-- Use `--parallelism=1` with shrinkray to eliminate parallel interference
-- Build fresh temp state inside the test and pass explicit DB/cache/worktree paths so candidates do not accidentally share mutable global state
+- First remove shared mutable state: build fresh temp state inside the test and pass explicit DB/cache/worktree paths so candidates do not accidentally share mutable global state
+- Only if that is impossible, use `--parallelism=1` with shrinkray to eliminate parallel interference
 - For race conditions: add `sleep` or retry logic (but this slows reduction significantly)
 
 ### 5. Reduction Is Too Slow
@@ -99,7 +99,7 @@ You are helping the user diagnose and fix problems with their test-case reductio
 - **Speed up compilation**: Use `-S` instead of `-c`, `-Wfatal-errors`, `-w` (suppress warnings when they don't matter)
 - **Avoid unnecessary work**: Don't link if you only need to compile. Don't run if you only need to compile.
 - **Use shrinkray's parallelism**: Ensure `--parallelism` is set to your core count (default)
-- **But disable parallelism for side-effecting tests**: `--parallelism=1` is usually the right starting point if the test mutates any external state
+- **Fix the harness before disabling parallelism**: if the test mutates external state, make that state private per invocation. Use `--parallelism=1` only when you cannot make runs independent
 - **Profile the test**: `time ./test.sh file.c` to see where time is spent
 
 ### 6. Reduced Output Has Undefined Behavior (C/C++)
@@ -187,5 +187,5 @@ When the user reports a problem, work through these steps:
 - Use `--volume=debug` for detailed pass-by-pass progress
 - Check `.shrinkray/` history directory for intermediate results
 - Use `--also-interesting=101` in the test to record interesting-but-wrong variants
-- Try `--parallelism=1` to eliminate parallel-related issues
+- First remove any shared mutable state in the interestingness test; if that is not possible, try `--parallelism=1` to eliminate parallel-related issues
 - Try `--formatter=none` if auto-formatting is interfering with reduction

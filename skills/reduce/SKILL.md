@@ -87,13 +87,13 @@ shrinkray ./test.sh file_to_reduce
 
 Key options to consider:
 - `--timeout N` — Override auto-calibrated timeout (useful if the bug is timing-sensitive)
-- `--parallelism N` — Limit parallelism (useful if the test has side effects)
+- `--parallelism N` — Control concurrency. Prefer fixing shared-state problems in the test so parallel runs are safe; only limit parallelism when you cannot make the harness hermetic.
 - `--input-type {stdin,arg,basename,all}` — How the test receives input (default: all)
 - `--formatter none` — Disable auto-formatting (if the formatter interferes)
 - `--volume debug` — Verbose output for troubleshooting
 - `--seed N` — Set random seed for reproducibility
 
-For stateful or side-effecting tests, start with:
+For stateful or side-effecting tests, the first goal is to make the harness hermetic so each run gets fresh private state and explicit paths for any mutable resources. If you can do that, keep shrinkray parallel. Only fall back to single-threaded reduction when the tool genuinely cannot be isolated:
 ```bash
 shrinkray --input-type=arg --parallelism=1 --formatter=none ./test.sh file_to_reduce
 ```
