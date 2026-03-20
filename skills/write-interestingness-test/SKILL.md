@@ -59,6 +59,24 @@ grep -q 'some_essential_function' "$1" || exit 1
 
 **Warning**: Don't over-constrain with grep checks. Every constraint you add is something the reducer can't remove, potentially preventing deeper reduction. Only add grep checks when you're getting bad results without them.
 
+For structured inputs, add the cheapest semantic checks you can:
+
+```python
+# Python example: reject invalid JSONL before invoking the slow tool
+import json
+
+with open(filename, "r", encoding="utf-8") as f:
+    saw_target = False
+    for line in f:
+        obj = json.loads(line)
+        if obj["id"] == "target-id":
+            saw_target = True
+if not saw_target:
+    return False
+```
+
+These checks should confirm "this still looks like the class of input I care about" without freezing lots of irrelevant payload into the final result.
+
 ### Phase 2: Validity Checks ("Not Bogus")
 
 Ensure the reduced test case is still well-formed enough to be meaningful. This prevents the reducer from finding a different, trivial bug (slippage).
@@ -206,6 +224,37 @@ if __name__ == '__main__':
         sys.exit(1)
 ```
 
+For stateful tools, Python is often the clearest way to build a hermetic harness:
+
+```python
+#!/usr/bin/env python3
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+def is_interesting(filename: str) -> bool:
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        db = work / "tool.db"
+        shutil.copy(filename, work / "input.jsonl")
+
+        init = subprocess.run(
+            ["tool", "--db", str(db), "init"],
+            cwd=work, capture_output=True, text=True, timeout=10
+        )
+        if init.returncode != 0:
+            return False
+
+        result = subprocess.run(
+            ["tool", "--db", str(db), "check", str(work / "input.jsonl")],
+            cwd=work, capture_output=True, text=True, timeout=10
+        )
+        return "specific failure signature" in result.stdout + result.stderr
+```
+
+This pattern avoids accidentally consulting a shared default database, cache, or checkout from the parent environment.
+
 ### Input Mode and Temporary Directories
 
 shrinkray runs your interestingness test in a **temporary directory**, not your original working directory. This is the single most common source of confusion. Your test will fail if it assumes it's running in your project directory or that any files other than the test case exist.
@@ -249,6 +298,7 @@ Because the test runs in a temp directory:
 - **Your shell environment may differ.** Tools must be on PATH or referenced by absolute path.
 - **Each parallel invocation gets its own temp directory.** You can safely create temp files *within* the CWD without worrying about collisions between parallel test runs. But don't write to shared locations like `/tmp/output.txt` — parallel runs will clobber each other.
 - **The CWD is ephemeral.** Don't rely on files persisting between invocations.
+- **Tools may still discover shared global state unless you override it.** If the program normally looks up `~/.cache/...`, `.git/`, or a default database path, point it at a fresh per-run location explicitly.
 
 Common pattern for tests that need auxiliary files:
 
@@ -270,6 +320,16 @@ Or just hardcode absolute paths:
 gcc -O2 -c "$1" > output.txt 2>&1
 grep -q "internal compiler error" output.txt
 ```
+
+### Tightening the Oracle During Reduction
+
+If reduction makes only small progress, inspect the current reduced artifact and tighten the interestingness test around what you actually see:
+
+- Match the exact failure signature, not just "some export failed" or "some TypeError happened".
+- If the current reduced case loses a specific record or identifier, require that exact loss.
+- Prefer shrinking toward one concrete manifestation of the bug over accepting a wide family of related failures.
+
+This often unlocks much stronger reductions than leaving the oracle broad and hoping the reducer converges on the same behavior you care about.
 
 ### Tracking Multiple Interesting Behaviors
 

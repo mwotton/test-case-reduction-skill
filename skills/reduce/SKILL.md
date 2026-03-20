@@ -41,6 +41,24 @@ shrinkray test.sh ./test-directory/
 ### Very large files
 Consider manual pre-reduction: remove sections that are obviously irrelevant (dead code, unrelated functions, unused imports) before starting the reducer.
 
+### Structured record-oriented inputs
+For JSONL, CSV, logs, config dumps, and similar record-oriented formats, do a coarse semantic reduction before running shrinkray:
+
+- Normalize fields that are probably irrelevant. If the bug still reproduces after replacing descriptions, timestamps, or other payload fields with constants, keep the normalized form as the new seed.
+- Try deleting whole records first. A simple line-based delta-debugging pass or targeted manual slicing often removes most of the bulk faster than generic byte-level reduction.
+- Only hand the result to shrinkray after you've shrunk the input to the records and fields that seem semantically relevant.
+
+This matters because shrinkray is excellent at local simplification, but it can spend a long time rediscovering record boundaries that you already know.
+
+### Stateful tools and mutable environments
+If the interestingness test drives a tool with external state, isolate that state per invocation before reduction:
+
+- Create a fresh temp directory, database, cache, or worktree inside the test.
+- Pass explicit paths like `--db /tmp/.../db.sqlite` instead of letting the tool discover a shared default.
+- Keep all scratch files inside the per-run temp directory so parallel runs cannot clobber each other.
+
+Without this, the reducer may appear flaky or get "stuck" because different candidates are accidentally sharing state.
+
 ## Step 3: Write the Interestingness Test
 
 If the user doesn't have one, help them write one. The test must:
@@ -75,11 +93,20 @@ Key options to consider:
 - `--volume debug` — Verbose output for troubleshooting
 - `--seed N` — Set random seed for reproducibility
 
+For stateful or side-effecting tests, start with:
+```bash
+shrinkray --input-type=arg --parallelism=1 --formatter=none ./test.sh file_to_reduce
+```
+
+If the test has its own internal timeouts and you do not want shrinkray to add another one, `--timeout 0` disables shrinkray's subprocess timeout. Do this only after you have verified that the test reliably kills or times out its own child processes.
+
 ## Step 5: Monitor and Iterate
 
 - **If reduction stalls**: The result may be a local minimum. Try:
   - Manual simplification of the stuck result, then re-running shrinkray
+  - For structured inputs, normalize irrelevant fields or delete whole records before re-running shrinkray
   - Loosening unnecessary constraints in the interestingness test
+- **If shrinkray seems silent**: Don't assume it's hung just because the UI is quiet. Check whether the candidate file is still changing in size or mtime and whether the interestingness test is still consuming CPU.
 - **If the result looks wrong**: The interestingness test probably has a bug. See the `debug-reduction` skill.
 
 ## Step 6: Verify the Result

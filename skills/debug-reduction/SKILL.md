@@ -51,12 +51,15 @@ You are helping the user diagnose and fix problems with their test-case reductio
 - **Interestingness test is too restrictive**: Over-constraining with grep checks prevents the reducer from removing code
 - **Format-specific constructs**: Some file structures resist generic byte-level reduction
 - **Interdependent code**: Removing any single piece breaks the bug, but removing multiple pieces together would work
+- **The current seed still contains lots of semantically irrelevant payload**: shrinkray is spending time rediscovering obvious structure instead of simplifying the bug
 
 **Fixes**:
 - Remove unnecessary grep constraints from the interestingness test
 - For shrinkray: the pass tiers handle this progressively — ensure reduction ran to completion
 - Try manual reduction: look at the stuck result and try removing something by hand. If that works but the reducer couldn't do it, file a bug
 - For C/C++: preprocess the file first (`gcc -E file.c > file.i`) to eliminate header dependencies
+- For JSONL, CSV, logs, and similar formats: normalize irrelevant fields and try deleting whole records before returning to shrinkray
+- If the current reduced case reveals a more specific bug signature, tighten the oracle around that exact behavior
 - Try a different reducer or combine reducers (run creduce then shrinkray, or vice versa)
 
 ### 4. Interestingness Test Is Flaky
@@ -78,6 +81,7 @@ You are helping the user diagnose and fix problems with their test-case reductio
 - Pin random seeds if the tool supports it
 - Clean up temp files at the start of each test invocation
 - Use `--parallelism=1` with shrinkray to eliminate parallel interference
+- Build fresh temp state inside the test and pass explicit DB/cache/worktree paths so candidates do not accidentally share mutable global state
 - For race conditions: add `sleep` or retry logic (but this slows reduction significantly)
 
 ### 5. Reduction Is Too Slow
@@ -95,6 +99,7 @@ You are helping the user diagnose and fix problems with their test-case reductio
 - **Speed up compilation**: Use `-S` instead of `-c`, `-Wfatal-errors`, `-w` (suppress warnings when they don't matter)
 - **Avoid unnecessary work**: Don't link if you only need to compile. Don't run if you only need to compile.
 - **Use shrinkray's parallelism**: Ensure `--parallelism` is set to your core count (default)
+- **But disable parallelism for side-effecting tests**: `--parallelism=1` is usually the right starting point if the test mutates any external state
 - **Profile the test**: `time ./test.sh file.c` to see where time is spent
 
 ### 6. Reduced Output Has Undefined Behavior (C/C++)
@@ -134,6 +139,24 @@ cd /tmp && /absolute/path/to/test.sh /absolute/path/to/original_file
 ```
 If this fails but running from your project directory succeeds, the test has a directory dependency.
 
+### 8. shrinkray Looks Hung But Might Just Be Silent
+
+**Symptoms**:
+- CPU is still busy, but the UI prints nothing useful for a long time
+- The reducer seems frozen in a PTY or scripted environment
+- You can't tell whether it is still making progress
+
+**Diagnosis**:
+- Some runs legitimately plateau for long stretches between wins
+- The selected UI may not emit useful incremental output in the current environment
+- The reducer may still be testing candidates even though the main artifact has not changed yet
+
+**Fixes**:
+- Check the candidate file's size and mtime directly instead of relying only on the UI
+- Use `ps` or similar to confirm the interestingness test is still running
+- If the artifact has not changed for a long time, inspect the current result and try a semantic pre-reduction or tighter oracle before resuming shrinkray
+- Prefer high-signal checkpoints over waiting blindly for hours
+
 ## Diagnostic Steps
 
 When the user reports a problem, work through these steps:
@@ -146,7 +169,8 @@ When the user reports a problem, work through these steps:
    - Run it on a known-good file (should exit non-zero)
    - Run it multiple times on the same file (should give consistent results)
 4. **Look at the reduced output** — does it still trigger the original bug, or a different one?
-5. **Check for environment issues** — absolute paths, permissions, temp directory behavior
+5. **Check for environment issues** — absolute paths, permissions, temp directory behavior, shared mutable state
+6. **Check whether the current seed can be normalized** — for structured inputs, see if constant payloads or whole-record deletion preserve the bug
 
 ## When to Suggest Rewriting vs. Patching
 
